@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>TETRIS</title>
+  <style>
+    /* 전체 화면 기본 스타일 */
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      font-family: sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: linear-gradient(135deg, #1e1e1e, #444);
+      color: #fff;
+    }
+
+    /* 게임 전체를 감싸는 컨테이너 */
+    .game-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+      background-color: rgba(0, 0, 0, 0.4);
+      border-radius: 8px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+    }
+
+    /* 상단의 제목 */
+    .game-title {
+      font-size: 2rem;
+      margin-bottom: 16px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.6);
+      letter-spacing: 2px;
+    }
+
+    /* 메인 게임 화면 + 다음 블록 + 버튼들 가로 정렬 */
+    .top-section {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap; /* 화면이 좁으면 자동 줄바꿈 */
+      justify-content: center;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+
+    /* 메인 게임 캔버스를 감싼 영역 */
+    .board-container {
+      display: inline-block;
+    }
+
+    /* 메인 테트리스 캔버스 */
+    #tetris {
+      background-color: #000;
+      border: 2px solid #fff;
+      image-rendering: pixelated;
+    }
+
+    /* 다음 블록 미리보기 영역 (제목 + 캔버스) */
+    .next-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .next-title {
+      margin-bottom: 8px;
+      font-size: 1.2rem;
+      text-shadow: 1px 1px 2px rgba(0,0,0,0.6);
+    }
+    /* 다음 블록 표시용 캔버스 */
+    #next {
+      background-color: #000;
+      border: 2px solid #fff;
+      image-rendering: pixelated;
+    }
+
+    /* 방향키/조작 버튼 컨테이너 */
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      margin-top: 12px;
+    }
+
+    /* 버튼 기본 스타일 */
+    .controls button {
+      background: #333;
+      color: #fff;
+      border: 1px solid #aaa;
+      border-radius: 4px;
+      padding: 12px;
+      font-size: 16px;
+      cursor: pointer;
+      min-width: 70px;
+      outline: none;
+      transition: background 0.2s;
+    }
+    .controls button:hover {
+      background: #555;
+    }
+    .controls button:active {
+      background: #777;
+    }
+  </style>
+</head>
+<body>
+  <div class="game-container">
+    <!-- 상단 타이틀 -->
+    <div class="game-title">TETRIS</div>
+
+    <div class="top-section">
+      <!-- 메인 테트리스 캔버스 -->
+      <div class="board-container">
+        <!-- 10 x 20 게임판, 칸 사이즈 20px => width=200, height=400 -->
+        <canvas id="tetris" width="200" height="400"></canvas>
+      </div>
+
+      <!-- 다음 블록 미리보기 -->
+      <div class="next-container">
+        <div class="next-title">NEXT</div>
+        <!-- 4x4, 여유 있게 120x120 -->
+        <canvas id="next" width="120" height="120"></canvas>
+      </div>
+    </div>
+
+    <!-- 클릭/터치 버튼들 -->
+    <div class="controls">
+      <button id="btn-left">←</button>
+      <button id="btn-rotate">회전</button>
+      <button id="btn-right">→</button>
+      <button id="btn-down">↓</button>
+      <button id="btn-hard-drop">HARD DROP</button>
+    </div>
+  </div>
+
+  <script>
+    // =======================
+    //  캔버스 / 컨텍스트 설정
+    // =======================
+    const canvas = document.getElementById('tetris');
+    const context = canvas.getContext('2d');
+    // 메인 게임(10x20), 한 칸을 20px로
+    context.scale(20, 20);
+
+    const nextCanvas = document.getElementById('next');
+    const contextNext = nextCanvas.getContext('2d');
+    // 다음 블록 표시 캔버스
+    // 한 칸 20px로 동일하게
+    contextNext.scale(20, 20);
+
+    // =======================
+    //  게임판(아레나) 설정
+    // =======================
+    const arenaWidth = 10;
+    const arenaHeight = 20;
+    const arena = createMatrix(arenaWidth, arenaHeight);
+
+    // =======================
+    //  플레이어 / 낙하 설정
+    // =======================
+    let dropCounter = 0;
+    let dropInterval = 1000; // 1초마다 자동 낙하
+    let lastTime = 0;
+
+    // 현재 조작 중인 블록
+    const player = {
+      pos: { x: 0, y: 0 },
+      matrix: null,
+    };
+
+    // 다음 블록(미리보기)
+    const nextPiece = {
+      matrix: null,
+    };
+
+    // =======================
+    //  함수들 정의
+    // =======================
+    // 2차원 배열(게임판) 생성
+    function createMatrix(w, h) {
+      const matrix = [];
+      while (h--) {
+        matrix.push(new Array(w).fill(0));
+      }
+      return matrix;
+    }
+
+    // 블록 종류 7가지
+    function createPiece(type) {
+      switch (type) {
+        case 'I':
+          return [
+            [0, 1, 0, 0],
+            [0, 1, 0, 0],
+            [0, 1, 0, 0],
+            [0, 1, 0, 0],
+          ];
+        case 'O':
+          return [
+            [2, 2],
+            [2, 2],
+          ];
+        case 'T':
+          return [
+            [0, 3, 0],
+            [3, 3, 3],
+            [0, 0, 0],
+          ];
+        case 'S':
+          return [
+            [0, 4, 4],
+            [4, 4, 0],
+            [0, 0, 0],
+          ];
+        case 'Z':
+          return [
+            [5, 5, 0],
+            [0, 5, 5],
+            [0, 0, 0],
+          ];
+        case 'J':
+          return [
+            [6, 0, 0],
+            [6, 6, 6],
+            [0, 0, 0],
+          ];
+        case 'L':
+          return [
+            [0, 0, 7],
+            [7, 7, 7],
+            [0, 0, 0],
+          ];
+      }
+    }
+
+    // arena와 블록 충돌 체크
+    function collide(arena, player) {
+      const [m, o] = [player.matrix, player.pos];
+      for (let y = 0; y < m.length; ++y) {
+        for (let x = 0; x < m[y].length; ++x) {
+          if (
+            m[y][x] !== 0 &&
+            (arena[y + o.y] && arena[y + o.y][x + o.x]) !== 0
+          ) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    // arena에 블록 합치기
+    function merge(arena, player) {
+      player.matrix.forEach((row, y) => {
+        row.forEach((value, x) => {
+          if (value !== 0) {
+            arena[y + player.pos.y][x + player.pos.x] = value;
+          }
+        });
+      });
+    }
+
+    // 가득 찬 라인 지우기
+    function arenaSweep() {
+      outer: for (let y = arena.length - 1; y >= 0; --y) {
+        for (let x = 0; x < arena[y].length; ++x) {
+          if (arena[y][x] === 0) {
+            continue outer;
+          }
+        }
+        // 라인 가득 참 -> 제거
+        const row = arena.splice(y, 1)[0].fill(0);
+        arena.unshift(row);
+        ++y;
+      }
+    }
+
+    // 메인 게임판 그리기
+    function draw() {
+      context.fillStyle = '#000';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+
+      drawMatrix(arena, { x: 0, y: 0 }, context);
+      drawMatrix(player.matrix, player.pos, context);
+    }
+
+    // 다음 블록 표시(중앙 정렬)
+    function drawNext() {
+      contextNext.fillStyle = '#000';
+      contextNext.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
+
+      const matrix = nextPiece.matrix;
+      if (!matrix) return;
+
+      // 최대 4x4 블록이므로, 5칸짜리 공간이라 생각하고 중앙 정렬
+      const offsetX = Math.floor((5 - matrix[0].length) / 2);
+      const offsetY = Math.floor((5 - matrix.length) / 2);
+
+      drawMatrix(matrix, { x: offsetX, y: offsetY }, contextNext);
+    }
+
+    // 행렬을 해당 컨텍스트에 그려줌
+    function drawMatrix(matrix, offset, ctx) {
+      matrix.forEach((row, y) => {
+        row.forEach((value, x) => {
+          if (value !== 0) {
+            ctx.fillStyle = getColor(value);
+            ctx.fillRect(x + offset.x, y + offset.y, 1, 1);
+          }
+        });
+      });
+    }
+
+    // 블록에 따른 색상
+    function getColor(value) {
+      switch (value) {
+        case 1: return 'cyan';   // I
+        case 2: return 'yellow'; // O
+        case 3: return 'purple'; // T
+        case 4: return 'green';  // S
+        case 5: return 'red';    // Z
+        case 6: return 'blue';   // J
+        case 7: return 'orange'; // L
+      }
+      return 'white';
+    }
+
+    // =======================
+    //  블록 움직임 로직
+    // =======================
+    // ↓ : 한 칸씩 낙하
+    function playerDrop() {
+      player.pos.y++;
+      if (collide(arena, player)) {
+        player.pos.y--;
+        merge(arena, player);
+        playerReset();
+        arenaSweep();
+      }
+      dropCounter = 0;
+    }
+
+    // ←, → : 좌우 이동
+    function playerMove(dir) {
+      player.pos.x += dir;
+      if (collide(arena, player)) {
+        player.pos.x -= dir;
+      }
+    }
+
+    // ↑(또는 X) : 회전
+    function playerRotate() {
+      const pos = player.pos.x;
+      let offset = 1;
+      rotate(player.matrix, 1);
+      while (collide(arena, player)) {
+        player.pos.x += offset;
+        offset = -(offset + (offset > 0 ? 1 : -1));
+        if (offset > player.matrix[0].length) {
+          rotate(player.matrix, -1);
+          player.pos.x = pos;
+          return;
+        }
+      }
+    }
+
+    // 하드 드롭: 블록을 한 번에 맨 아래로
+    function playerHardDrop() {
+      while (!collide(arena, player)) {
+        player.pos.y++;
+      }
+      // 충돌 지점 직전까지만 유효
+      player.pos.y--;
+      merge(arena, player);
+      playerReset();
+      arenaSweep();
+      dropCounter = 0;
+    }
+
+    // 행렬(블록) 시계/반시계 회전
+    function rotate(matrix, dir) {
+      for (let y = 0; y < matrix.length; ++y) {
+        for (let x = 0; x < y; ++x) {
+          [matrix[x][y], matrix[y][x]] = [matrix[y][x], matrix[x][y]];
+        }
+      }
+      if (dir > 0) {
+        matrix.forEach(row => row.reverse());
+      } else {
+        matrix.reverse();
+      }
+    }
+
+    // =======================
+    //  새 블록 / Next Piece
+    // =======================
+    // 다음 블록 준비 후, 플레이어가 새 블록을 가져옴
+    function playerReset() {
+      // 플레이어가 처음이면 => nextPiece에서 가져오거나 생성
+      if (!player.matrix) {
+        player.matrix = nextPiece.matrix || createRandomPiece();
+      } else {
+        // 이미 블록이 있었다면 => nextPiece.matrix로 교체
+        player.matrix = nextPiece.matrix;
+      }
+      // 그 후 nextPiece는 새로 랜덤 생성
+      nextPiece.matrix = createRandomPiece();
+
+      // 위치를 상단 중앙으로
+      player.pos.y = 0;
+      player.pos.x = (arena[0].length / 2 | 0) -
+                     (player.matrix[0].length / 2 | 0);
+
+      // 생성 직후 충돌 => 게임판 리셋(간단한 게임오버 대처)
+      if (collide(arena, player)) {
+        arena.forEach(row => row.fill(0));
+      }
+    }
+
+    function createRandomPiece() {
+      const pieces = 'IOTSZJL';
+      return createPiece(pieces[Math.floor(Math.random() * pieces.length)]);
+    }
+
+    // =======================
+    //  반복 애니메이션
+    // =======================
+    function update(time = 0) {
+      const deltaTime = time - lastTime;
+      lastTime = time;
+
+      dropCounter += deltaTime;
+      if (dropCounter > dropInterval) {
+        playerDrop();
+      }
+
+      draw();
+      drawNext();
+
+      requestAnimationFrame(update);
+    }
+
+    // =======================
+    //  이벤트 리스너
+    // =======================
+    // 키보드 조작
+    document.addEventListener('keydown', event => {
+      switch (event.key) {
+        case 'ArrowLeft':
+          playerMove(-1);
+          break;
+        case 'ArrowRight':
+          playerMove(1);
+          break;
+        case 'ArrowDown':
+          playerDrop();
+          break;
+        case 'ArrowUp':
+        case 'x':
+        case 'X':
+          playerRotate();
+          break;
+        case ' ':
+          // 스페이스바로 하드 드롭
+          playerHardDrop();
+          break;
+      }
+    });
+
+    // 화면(터치) 버튼 조작
+    document.getElementById('btn-left').addEventListener('click', () => {
+      playerMove(-1);
+    });
+    document.getElementById('btn-right').addEventListener('click', () => {
+      playerMove(1);
+    });
+    document.getElementById('btn-down').addEventListener('click', () => {
+      playerDrop();
+    });
+    document.getElementById('btn-rotate').addEventListener('click', () => {
+      playerRotate();
+    });
+    document.getElementById('btn-hard-drop').addEventListener('click', () => {
+      playerHardDrop();
+    });
+
+    // =======================
+    //  게임 시작
+    // =======================
+    // 초기 nextPiece를 랜덤 생성
+    nextPiece.matrix = createRandomPiece();
+    // playerReset으로 현재 블록 확정
+    playerReset();
+    // 게임 루프 시작
+    update();
+  </script>
+</body>
+</html>
